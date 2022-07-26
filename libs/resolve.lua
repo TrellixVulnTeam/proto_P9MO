@@ -1,4 +1,6 @@
 
+-- TODO : ignore files (.buildignore)
+
 local module = {}
 
 local hash       = require "hash"
@@ -41,6 +43,81 @@ local function resolveFileChanged(filename,shortName,lastFiles,cachedFileIO,cach
 end
 module.resolveFileChanged = resolveFileChanged
 
+--- get last build status from OUT_PATH
+local function resolveLastBuildStatus(OUT_PATH)
+    local buildStatusPath = concatPath(OUT_PATH,"build_status.json")
+
+    local buildStatus,buildStatusERR = fs.readFileSync(buildStatusPath)
+    if not buildStatus then
+        if buildStatusERR and buildStatusERR:match"ENOENT" then
+            logger.info "Last build status file not found from OUT_PATH, just make one"
+            buildStatus = {}
+        else
+            logger.errorf("Error occured while reading last build status\n%s",tostring(buildStatusERR))
+            return nil,"UNABLE TO RESOLVE BUILD LIST"
+        end
+    else
+        buildStatus = json.decode(buildStatus)
+        if not buildStatus then
+            logger.error "Unable to decode build_status.json, maybe file was corrupted?"
+            return nil,"UNABLE TO RESOLVE BUILD LIST"
+        end
+    end
+    return buildStatus
+end
+module.resolveLastBuildStatus = resolveLastBuildStatus
+
+local function resolveDependentTree(filename,SRC_PATH,cachedFileIO,lastFiles,buildlist,checked)
+    buildlist = buildlist or {}
+    checked = checked or {}
+    local shortName = filename:sub(#SRC_PATH+2,-1)
+
+    -- if checked already, ignore
+    if checked[shortName] then return end
+    checked[shortName] = true
+
+    local file,err = cachedFileIO:read(filename)
+    if file then
+        insert(buildlist,{
+            hash = hash(file);
+            name = filename;
+            shortName = shortName;
+        })
+    else
+        insert(buildlist,{
+            name = shortName;
+            shortName = shortName;
+            removed = true;
+        })
+    end
+
+
+    for child,item in pairs(lastFiles) do
+        local dependent = item.dependent
+        if dependent then
+            for _,depend in ipairs(dependent) do
+                if depend == shortName then
+                    resolveDependentTree(concatPath(SRC_PATH,child),SRC_PATH,cachedFileIO,lastFiles,buildlist,checked)
+                    break
+                end
+            end
+        end
+    end
+
+    return buildlist
+end
+--- make buildlist from one file (using dependent tree). this is reversed version of resoleBuildlist(trace one file to list <=> whole to list)
+local function resolveBuildlistFromDependentTree(SRC_PATH,OUT_PATH,cachedFileIO,filename)
+    local buildStatus,buildStatusERR = resolveLastBuildStatus(OUT_PATH)
+    if not buildStatus then -- if errored while reading last build status
+        return nil,buildStatusERR
+    end
+
+    local lastFiles = buildStatus.lastFiles or {}
+    return resolveDependentTree(filename,SRC_PATH,cachedFileIO,lastFiles)
+end
+module.resolveBuildlistFromDependentTree = resolveBuildlistFromDependentTree
+
 --- check dependent/file chaged status and return is build nedded
 local function resolveBuildNeeded(filename,SRC_PATH,lastFiles,cachedFileIO,cachedHash)
     local shortName = filename:sub(#SRC_PATH+2,-1)
@@ -65,31 +142,19 @@ local function resolveBuildNeeded(filename,SRC_PATH,lastFiles,cachedFileIO,cache
 end
 module.resolveBuildNeeded = resolveBuildNeeded
 
+--- make buildlist by check hash of each files
 function module.resoleBuildlist(SRC_PATH,OUT_PATH,cachedFileIO)
     ---@type promise
     local srcFileListPromise = recursiveFilesListAsync(SRC_PATH)
-    local buildStatusPath = concatPath(OUT_PATH,"build_status.json")
-
-    local buildStatus,buildStatusERR = fs.readFileSync(buildStatusPath)
-    if not buildStatus then
-        if buildStatusERR and buildStatusERR:match"ENOENT" then
-            logger.info "Last build status file not found from OUT_PATH, just make one"
-            buildStatus = {}
-        else
-            logger.errorf("Error occured while reading last build status\n%s",tostring(buildStatusERR))
-            return nil,"UNABLE TO RESOLVE BUILD LIST"
-        end
-    else
-        buildStatus = json.decode(buildStatus)
-        if not buildStatus then
-            logger.error "Unable to decode build_status.json, maybe file was corrupted?"
-            return nil,"UNABLE TO RESOLVE BUILD LIST"
-        end
+    local buildStatus,buildStatusERR = resolveLastBuildStatus(OUT_PATH)
+    if not buildStatus then -- if errored while reading last build status
+        return nil,buildStatusERR
     end
 
     local lastFiles = buildStatus.lastFiles or {}
     local buildlist = {}
 
+    -- wait for src scan
     local srcFileList = srcFileListPromise:await()
     if srcFileListPromise:isFailed() then
         logger.errorf("Error occured while reading src file list\n%s",srcFileList)
@@ -123,8 +188,7 @@ function module.resoleBuildlist(SRC_PATH,OUT_PATH,cachedFileIO)
         end
     end
 
-    logger.info(buildlist)
-
+    return buildlist
 end
 
 return module
