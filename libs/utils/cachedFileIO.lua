@@ -7,6 +7,13 @@ local resolve = pathModule.resolve
 local readFileSync = fs.readFileSync
 local writeFileSync = fs.writeFileSync
 
+---Check is cached
+---@param path string path of file (will be resolved automatically)
+---@return boolean|string status file is cached
+function module:checkCached(path)
+    return self.storage[resolve(path)] or false
+end
+
 ---Read file and save into cache storage
 ---@param path string path of file (will be resolved automatically)
 ---@return boolean|string fileContent content of file, if failed to load file, it will be false and error information will given on next return value

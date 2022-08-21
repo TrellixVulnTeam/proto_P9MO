@@ -1,10 +1,15 @@
 
 local module = {}
 local fs = require "fs"
+local spawn = require("coro-spawn")
 
+local osname = jit.os
 local insert = table.insert
 local concat = table.concat
 local format = string.format
+local gmatch = string.gmatch
+local match  = string.match
+local gsub   = string.gsub
 
 local concatPathFormat = "%s/%s"
 ---Concat to path or more
@@ -37,6 +42,54 @@ local function recursiveGetFilesList(path,list,fullPath)
 end
 function module.recursiveFilesList(path)
     return recursiveGetFilesList(path)
+end
+
+function module.mkpath(path)
+    local dir
+    for str in gmatch(path,"[^/]+") do
+        if dir then
+            dir = concatPath(dir,str)
+        else dir = str
+        end
+        fs.mkdirSync(dir)
+    end
+end
+
+function module.getExt(path)
+    return match(path,"%.([^.]+)$")
+end
+
+function module.getParent(path)
+    return match(path,"(.+)/[^/+]")
+end
+
+function module.copy(from,to)
+    local proc,err
+    if osname == "Windows" then
+        proc,err = spawn("copy",{
+            args = {
+                from:gsub("/","\\");
+                to:gsub("/","\\");
+            };
+            stdio = {nil,nil,true};
+        })
+    else
+        proc,err = spawn("cp",{
+            args = {from,to};
+            stdio = {nil,nil,true};
+        })
+    end
+    if not proc then
+        error(err)
+    end
+    local exitcode = proc.waitExit()
+    if exitcode ~= 0 then
+        local stderr = {}
+        for str in proc.stderr.read do
+            insert(stderr,str)
+        end
+        error(gsub(concat(stderr),"\n+$",""))
+    end
 end
 
 return module
