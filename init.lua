@@ -217,7 +217,12 @@ Command 'build'
          | return function (filecontent,env)
          |     return "Qwreey made this!\n"..filecontent
          | end
+    --hard|-h
+        remove all of builded files and rebuild
+        this is slower method. but should be fix many bugs
 
+Command 'watch'
+    Alias
 ]])
         return
     elseif command == "build" then

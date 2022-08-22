@@ -34,6 +34,8 @@ local unpack = table.unpack;
 --#region --* Log/Debug *--
 ---@diagnostic disable
 local _,prettyPrint = pcall(require,"pretty-print")
+local _,timer = pcall(require,"timer")
+local setTimeout = timer and timer.setTimeout
 local stdout = type(prettyPrint) == "table" and prettyPrint.stdout
 local ioStdout = io.write
 function promise.log(err)
@@ -76,7 +78,7 @@ promise.__tostring = function(self)
 	return ("promise: %s (%s)"):format(this:match("0x.+"),self.__id);
 end;
 
-promise.__gc = function(self)
+function promise:__uncatch()
 	local notCatched = self.__notCatched
 	if notCatched then
 		promise.log(err_unhandled(self,notCatched));
@@ -320,6 +322,10 @@ function promise:execute()
 			else
 				if type(self.__notCatched) == "nil" then
 					self.__notCatched = results[1]; -- setCatched
+					if setTimeout then
+						setTimeout(2000,self.__uncatch,self);
+					else self:__uncatch();
+					end
 				end
 			end
 			self.__catch = nil;
